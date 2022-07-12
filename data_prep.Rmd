@@ -1,0 +1,1073 @@
+---
+title: "Przygotowanie danych - projekt"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    theme: flatly
+    code_folding: hide
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+**Zmienne w zbiorze danych:**
+
+* *BeerID* - ID rekordu przepisu na piwo
+* *Name* - Nazwa piwa
+* *URL* - Adres www w przeglądarce do przepisu na piwo
+* *Style* - Nazwa stylu piwa
+* *StyleID* - Identyfikator stylu piwa
+* *Size.L.* - Ilość warzonego piwa
+* *OG* - Ciężar właściwy beczki przed fermentacją
+* *FG* - Ciężar właściwy beczki po fermentacji
+* *ABV* - Procentowa zawartość alkoholu w piwie
+* *IBU* - Międzynarodowa jednostka goryczy w piwie
+* *Color* - Standardowa metoda referencyjna koloru piwa: 0 - jasne, 50 - ciemne
+* *BoilSize* - Ilość cieczy na początku wrzenia
+* *BoilTime* - Czas warzenia piwa
+* *BoilGravity* - Ciężar właściwy beczki przed zagotowaniem
+* *Efficiency* - Skuteczność ekstrakcji zacieru piwnego - ekstrakcja cukrów z ziarna podczas zacierania
+* *MashThickness* - Ilość wody na funt ziarna
+* *SugarScale* - Skala do określenia stężenia rozpuszczonych ciał stałych w beczce
+* *BrewMethod* - Technika warzenia piwa
+* *PitchRate* - Drożdże dodawane do fermentora na jednostkę grawitacyjną - m komórek/ml/deg P
+* *PrimaryTemp* - Temperatura na etapie fermentacji w stopniach Celsjusza
+* *PrimaryMethod* - Metoda gruntowania
+* *PrimingAmount* - Ilość użytego cukru gruntującego
+* *UserId* - ID użytkownikia 
+
+
+**Potrzebne pakiety**
+```{r, message=FALSE, warning=FALSE}
+library('dplyr')
+library('ggplot2')
+library('car')
+library('VIM')
+library('readxl')
+library('gridExtra')
+library('corrplot')
+library('EnvStats')
+library('psych')
+library('sampling') 
+```
+
+**Wczytanie danych**
+```{r}
+dane <- read.csv("C:/Users/domin/OneDrive/Pulpit/PROJEKT/recipeData.csv", sep = ",")
+danes <- read.csv("C:/Users/domin/OneDrive/Pulpit/PROJEKT/styleData.csv", sep = ";")
+```
+
+***Zamiana okresleń "N/A" na faktyczne braki***
+```{r}
+head(is.na(dane),10)
+dane<-replace(dane, dane == "N/A", NA)
+head(dane,10)
+head(danes,10)
+```
+
+***1.Określenie celu badania:***
+
+Celem badania jest przygotowanie zbioru danych do przeprowadzenia estymacji modelu liniowego (regresji liniowej) objaśniającego procentową zawartość alkoholu (zmienna objaśniana - ABV) na podstawie innych zmiennych ze zbioru.
+
+***2. Opisanie każdej z zmiennych znajdujących się w zbiorze:***
+
+**a. Skala pomiarowa**
+
+**b. Jednostka miary**
+
+**d. Prosta wizualizacja zmiennych**
+
+
+**BeerID -> skala nominalna -> bez jednostki miary**
+```{r}
+dane$BeerID <- as.factor(dane$BeerID)
+head(table(dane$BeerID),10)
+#Brak wizualizacji, ponieważ każda liczba, która jest etykietą danego piwa jest powtórzona jeden raz
+```
+
+**Name -> skala nominalna-> bez jednostki miary**
+```{r}
+dane$Name<-as.factor(dane$Name)
+head(table(dane$Name),10)
+#Brak wizualizacji, ponieważ nie można pokazać tego typu zmiennych na wykresie
+```
+
+**URL -> skala nominalna -> bez jednostki miary**
+```{r}
+dane$URL<-as.factor(dane$URL)
+head(table(dane$URL),10)
+#Brak wizualizacji, ponieważ nie można pokazać tego typu zmiennych na wykresie
+```
+
+**Style -> skala nominalna -> bez jednostki miary**
+```{r}
+dane$Style<-as.factor(dane$Style)
+head(table(dane$Style),10)
+
+dane %>%
+  group_by(Style) %>% 
+  filter(n() > 700) %>% 
+  mutate(count = n()) %>%
+  ggplot(aes(x = reorder(Style, count))) + 
+  geom_bar(fill = 'pink') + 
+  coord_flip() + 
+  theme_minimal() + 
+  labs(x = 'Style', y = 'Liczebność', title = "Najpopularniejsze style piwa")
+
+ggplot(dane , aes(x=factor(Style), fill=factor(Style))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**StyleID - skala nominalna -> bez jednostki miary**
+```{r}
+head(table(dane$StyleID),10)
+
+ggplot(dane, aes(x=StyleID)) + 
+  geom_histogram(color="pink", fill="grey")
+
+ggplot(dane , aes(x=factor(StyleID), fill=factor(StyleID))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**Size.L. - skala ilorazowa -> wyrażone w litrach**
+```{r}
+dane$Size.L.<-as.numeric(dane$Size.L.)
+mean(dane$Size.L., na.rm='TRUE')
+
+ggplot(dane, aes(x=Size.L.)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**OG -> skala ilorazowa -> wyrażona w kN/m^3 (ciężar właświy - po konwersji jednostek będących w innej skali)**
+```{r}
+#funkcja odpowiadająca za zamianę jednostek do jednej z dwóch skali, w której podana jest zmienna
+convog <- function(x) {
+  return(1+ (x / (258.6 - ( (x/258.2) *227.1) )))
+  }
+  
+for ( i in  1 : nrow(dane) )  {
+  if (dane$SugarScale[i] >= 'Plato') {
+    dane$OG[i] = convog(dane$OG[i])
+  }
+}
+
+dane$OG<-round(dane$OG,3)
+dane$OG<-as.numeric(dane$OG)
+mean(dane$OG, na.rm='TRUE')
+
+ggplot(dane, aes(x=OG)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**FG-> skala ilorazowa -> wyrażona w kN/m^3(ciężar właświy - po konwersji jednostek będących w innej skali)**
+```{r}
+#funkcja odpowiadająca za zamianę jednostek do jednej z dwóch skali, w której podana jest zmienna
+convog <- function(x) {
+  return(1+ (x / (258.6 - ( (x/258.2) *227.1) )))
+  }
+  
+for ( i in  1 : nrow(dane) )  {
+  if (dane$SugarScale[i] >= 'Plato') {
+    dane$FG[i] = convog(dane$FG[i])
+  }
+}
+
+dane$FG<-round(dane$FG,3)
+dane$FG<-as.numeric(dane$FG)
+mean(dane$FG, na.rm='TRUE')
+
+ggplot(dane, aes(x=FG)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**ABV-> skala ilorazowa -> wyrażona w procentach**
+```{r}
+dane$ABV<-as.numeric(dane$ABV)
+mean(dane$ABV, na.rm='TRUE')
+
+ggplot(dane, aes(x=ABV)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**IBU-> skala przedziałowa -> jednostki IBU**
+```{r}
+head(table(dane$IBU),10)
+
+#Pokazanie skali jednostek IBU w innej formie
+dane$IBU_1 <- recode(dane$IBU, "8:20 ='8-20'; 16.1:25 ='16-25'; NA=NA; 18.1:28='18-28';18.1:30='18-30';20.1:40='20-40';25.1:50='25-50';
+                       20.1:40='20-40+';30.1:45='30-45+';40.1:60='40-60+';else='40-120+'")
+head(table(dane$IBU_1),10)
+
+ggplot(dane, aes(x=IBU)) + 
+  geom_histogram(color="pink", fill="grey")
+
+ggplot(dane , aes(x=factor(IBU_1), fill=factor(IBU_1))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**Color ->skala przedziałowa -> jednostka SRM**
+```{r}
+head(table(dane$Color),10)
+
+ggplot(dane, aes(x=Color)) + 
+  geom_histogram(color="pink", fill="grey")
+
+#Pokazanie skali koloru w innej formie
+dane$Color_1 <- recode(dane$Color, "0:2 ='2'; 2.1:3 ='3'; NA=NA;3.1:4='4';4.1:6='6';6.1:8='8';8.1:10='10';10.1:13='13';13.1:17='17';17.1:20='20';20.1:24='24';24.1:29='29';29.1:35='35'; else ='40+'")
+
+ggplot(dane , aes(x=factor(Color_1), fill=factor(Color_1))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**BoilSize -> skala ilorazowa -> wyrażone w litrach**
+```{r}
+dane$BoilSize<-as.numeric(dane$BoilSize)
+mean(dane$BoilSize, na.rm='TRUE')
+
+ggplot(dane, aes(x=BoilSize)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**BoilTime -> skala ilorazowa -> jednostka: minuty**
+```{r}
+dane$BoilTime<-as.numeric(dane$BoilTime)
+mean(dane$BoilTime, na.rm='TRUE')
+
+ggplot(dane, aes(x=BoilTime)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**BoilGravity -> skala ilorazowa -> wyrażona w kN/m^3(ciężar właświy - po konwersji jednostek będących w innej skali)**
+```{r}
+dane$BoilGravity <- as.numeric(dane$BoilGravity) 
+
+#funkcja odpowiadająca za zamianę jednostek do jednej z dwóch skali, w której podana jest zmienna
+convog <- function(x) {
+  return(1+ (x / (258.6 - ( (x/258.2) *227.1) )))
+  }
+  
+for ( i in  1 : nrow(dane) )  {
+  if (dane$SugarScale[i] >= 'Plato') {
+    dane$BoilGravity[i] = convog(dane$BoilGravity[i])
+  }
+}
+dane$BoilGravity<-round(dane$BoilGravity,3)
+mean(dane$BoilGravity, na.rm='TRUE')
+
+ggplot(dane, aes(x=BoilGravity)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**Efficiency-> skala przedziałowa -> jednostka miary: procenty**
+```{r}
+head(table(dane$Efficiency),10)
+
+ggplot(dane, aes(x=Efficiency)) + 
+  geom_histogram(color="pink", fill="grey")
+
+#Przedstawienie zmiennej w innej formie
+dane$Efficiency_1 <- recode(dane$Efficiency, "0:10 ='0-10'; 10.1:20 ='10-20'; NA=NA; 20.1:30='20-30';30.1:40='30-40';40.1:50='40-50';
+                        50.1:60='50-60';60.1:70='60-70';70.1:80='70-80';80.1:90='80-90';else='90-100'")
+table(dane$Efficiency_1)
+
+ggplot(dane , aes(x=factor(Efficiency_1), fill=factor(Efficiency_1))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**MashThickness -> skala ilorazowa -> wyrażone w litrach**
+```{r}
+dane$MashThickness <- as.numeric(dane$MashThickness)
+mean(dane$MashThickness, na.rm='TRUE')
+
+ggplot(dane, aes(x=MashThickness)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**SugarScale -> skala nominalna: dychotomiczna -> brak jednostki miary**
+```{r}
+dane$SugarScale<-as.factor(dane$SugarScale)
+head(table(dane$SugarScale),50)
+
+ggplot(dane , aes(x=factor(SugarScale), fill=factor(SugarScale))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**BrewMethod -> skala nominalna (4 warianty)-> brak jednostki miary**
+```{r}
+dane$BrewMethod<-as.factor(dane$BrewMethod)
+head(table(dane$BrewMethod),10)
+
+ggplot(dane , aes(x=factor(BrewMethod), fill=factor(BrewMethod))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**PitchRate -> skala ilorazowa -> jednostka miary: m komórek/ml/deg P**
+```{r}
+dane$PitchRate <- as.numeric(dane$PitchRate) 
+mean(dane$PitchRate, na.rm='TRUE')
+
+ggplot(dane, aes(x=PitchRate)) + 
+  geom_histogram(color="pink", fill="grey")
+
+ggplot(dane , aes(x=factor(PitchRate), fill=factor(PitchRate))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**PrimaryTemp -> skala przedziałowa -> jednostka miary: temperatura w stopniach Celsjusza**
+```{r}
+dane$PrimaryTemp<-as.numeric(dane$PrimaryTemp)
+head(table(dane$PrimaryTemp),10)
+
+ggplot(dane, aes(x=PrimaryTemp)) + 
+  geom_histogram(color="pink", fill="grey")
+
+#Przedstawienie zmiennej w innej formie
+dane$PrimaryTemp_1 <- recode(dane$Efficiency, "-20:0 ='<0'; 0.1:50 ='0-50';50.1:60 ='50-60';60.1:70 ='60-70';70.1:100='70>';else='NA'")
+table(dane$PrimaryTemp_1)
+
+ggplot(dane , aes(x=factor(PrimaryTemp_1), fill=factor(PrimaryTemp_1))) +
+  geom_bar() +
+  theme(legend.position="none")
+```
+
+**PrimingMethod -> skala nominalna -> brak jednostki miary**
+```{r}
+dane$PrimingMethod<-as.factor(dane$PrimingMethod)
+head(table(dane$PrimingMethod),10)
+#Brak wizualizacji, ponieważ nie można pokazać tego typu zmiennych na wykresie
+```
+
+**PrimingAmount -> skala ilorazowa -> jednostki miary: różne**
+```{r}
+dane$PrimingAmount<-as.factor(dane$PrimingAmount)
+head(table(dane$PrimingAmount),10)
+#Brak wizualizacji, ponieważ nie można pokazać tego typu zmiennych na wykresie
+```
+
+**UserId -> skala nominalna -> brak jednostki miary**
+```{r}
+head(table(dane$UserId),10)
+
+ggplot(dane, aes(x=UserId)) + 
+  geom_histogram(color="pink", fill="grey")
+```
+
+**c. Podstawowe statystyki opisowe dla zmiennych:**
+```{r}
+dane$StyleID <- as.factor(dane$StyleID)
+dane$IBU<-as.factor(dane$IBU)
+dane$Color<-as.factor(dane$Color)
+dane$Efficiency<-as.factor(dane$Efficiency)
+dane$PrimaryTemp <- as.factor(dane$PrimaryTemp)
+dane$UserId<-as.factor(dane$UserId)
+dane<-dane[-c(24,25,26,27)]
+summary(dane)
+```
+
+**Wniosek**
+Ze względu na cel badania powinny zostać wyeliminowane zmienne: BeerID, Name, URL, UserId oraz zmienna Style, ponieważ w zbiorze znajduje się już zmienna StyleID, która już informuje na jaki styl piwa jest dany przepis. Wskazane zmienne nie mają wpływu na objaśnianie procentowej zawartości alkoholu w piwie. Plik wgrany jako `danes` nie będzie wykorzystywany, ponieważ powiela informacje, które znajdują się już w danych wgranych jako `dane`.
+
+***3. Imputacje braków danych. Zastosowanie wybranej metody imputacji danych, z uzasadnieniem wyboru.***
+
+**Wszystkie zmienne ze zbioru zostały poddane analizie braków**
+
+**Liczba braków dla poszczególnych zmiennych oraz kombinacje braków danych**
+```{r}
+ summary(aggr(dane, plot=FALSE))
+```
+**Wniosek:**
+Ponieważ zmienna URL nie ma wpływu na badane zjawisko, do którego przygotowywane są dane oraz nie posiada braków, zostanie na tym etapie wyeliminowana. Zmienna Name posiada jeden brak, ale również jest nieprzydatna zważywszy na cel badania, więc również zostaje wyeliminowana. Zmienna BeerID pozostanie w zbiorze do etapu 4 włącznie, dla celów identyfikacji danego rekordu. Zmienna SugarScale, również zostanie usunięta, ponieważ nie posiada braków oraz zmienne, które były zapisane jako typ `Plato` zostały przekonwertowane w etapie 2 na typ `Specific Gravity`, więc zmienna jest już bezużyteczna.
+
+***Ponowne wczytanie danych po usunięciu zmiennych***
+```{r}
+dane1 <- subset(dane,select = -c(Name, URL, SugarScale))
+head(dane1,10)
+```
+
+**Sprawdzenie czy zmienne są zapisane w postaci data frame**
+```{r}
+str(dane1)
+```
+
+**Wizualizacja braków danych i wzoru braków danych**
+* *Wykres 1* - Procentowa ilość braków danych u poszczególnych zmiennych
+* *Wykres 2* - Wzór braków danych - występowanie braków pomiędzy rekaordami tzn, równoczesnie dla poniższych zmiennych
+```{r} 
+plot_missing<-aggr(dane1, col=c('grey','pink'),
+                   numbers=TRUE, sortVars=TRUE,
+                   labels=names(dane1), cex.axis=0.5,
+                   cex.lab=2,
+                   gap=1, ylab=c('Braki',"Wzór braków"))
+```
+
+**Wniosek**
+Ponieważ zmienne PrimingAmount, PrimingMethod, UserId i PitchRate posiadają ponad 50% brakujących danych na tym etapie zostają wyeliminowane i nie będą brane pod uwagę w dalszej części przygotowania danych. Zmienna Style także zostaje wyeliminowana, ponieważ jak wcześniej wspomniano w zbiorze jest już zmienna StyleID, która nie posiada braków.
+
+***Ponowne wczytanie danych po usunięciu wyeliminowanych zmiennych***
+```{r}
+dane2 <- subset(dane1,select = -c(PrimingAmount, PrimingMethod, UserId, PitchRate, Style))
+head(dane2,10)
+```
+
+
+**BoilGravity - imputacja braków danych średnią arytmetyczną, ponieważ jest to skala ilorazowa i nie ma ograniczeń na operacje matematyczne**
+```{r}
+dane2$BoilGravity<-as.numeric(dane2$BoilGravity)
+dane2<-dane2%>%
+  mutate(BoilGravity_1=if_else(is.na(BoilGravity), mean(BoilGravity,na.rm = T), BoilGravity))
+dane2$BoilGravity_1<-round(dane2$BoilGravity_1,3)
+#odchylenie standardowe przed imputacją
+sd(dane2$BoilGravity, na.rm=T)
+#odchylenie standardowe po imputacji
+sd(dane2$BoilGravity_1, na.rm=T)
+
+#wykres przed imputacją
+ggplot(dane2, aes(x=BoilGravity)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+
+#wykres po imputacji
+ggplot(dane2, aes(x=BoilGravity_1)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+```
+
+**MashThickness - imputacja braków danych średnią arytmetyczną, ponieważ jest to skala ilorazowa i nie ma ograniczeń na operacje matematyczne**
+```{r}
+dane2$MashThickness<-as.numeric(dane2$MashThickness)
+dane2<-dane2%>%
+  mutate(MashThickness_1=if_else(is.na(MashThickness), mean(MashThickness,na.rm = T), MashThickness))
+dane2$MashThickness_1<-round(dane2$MashThickness_1,3)
+#odchylenie standardowe przed imputacją
+sd(dane2$MashThickness, na.rm=T)
+#odchylenie standardowe po imputacji
+sd(dane2$MashThickness_1, na.rm=T)
+
+#wykres przed imputacją
+ggplot(dane2, aes(x=MashThickness)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+
+#wykres po imputacji
+ggplot(dane2, aes(x=MashThickness_1)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+```
+
+**PrimaryTemp - imputacja braków danych za pomocą mediany, ponieważ jest to skala przedziałowa i nie można na niej wykonywać operacji dzielenia tzn. obliczenia średniej**
+```{r}
+dane2$PrimaryTemp<-as.numeric(dane2$PrimaryTemp)
+dane2<-dane2%>%
+  mutate(PrimaryTemp_1=if_else(is.na(PrimaryTemp), median(PrimaryTemp,na.rm = T), PrimaryTemp))
+dane2$PrimaryTemp_1<-round(dane2$PrimaryTemp_1,3)
+#wykres przed imputacją
+ggplot(dane2, aes(x=PrimaryTemp)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+
+#wykres po imputacji
+ggplot(dane2, aes(x=PrimaryTemp_1)) + 
+  geom_histogram(color="pink", fill="darkgrey")
+```
+
+**Przypisanie zimputowanych danych do nazw pierwotnych zmiennych**
+```{r}
+dane2$BoilGravity<-as.numeric(dane2$BoilGravity_1)
+dane2$MashThickness<-as.numeric(dane2$MashThickness_1)
+dane2$PrimaryTemp<-as.factor(dane2$PrimaryTemp_1)
+```
+
+**Sprawdzenie poprawności imputacji - czy nie ma żadnych braków**
+```{r}
+dane2 <- subset(dane2,select = -c(BoilGravity_1, MashThickness_1, PrimaryTemp_1))
+NA_count <- colSums(is.na(dane2))
+NA_count
+```
+**Wniosek:**
+Nie ma żadnych braków danych, można przejść do analizy wartości skrajnych.
+
+
+***4. Analiza wartości skrajnych:***
+
+*Analiza wartości skrajnych została wykonana za pomocą średniej i odchylenia standardowego. Przed analizą sprawdzono za pomocą testu Kołmogorowa-Smirnowa czy dana zmienna ma rozkład normalny. W analizie przyjęto, że zmienne są zbliżone do rozkładu normalnego.*
+
+**a. Identyfikacja wartości skrajnych**
+
+**Nadpisanie zmiennych**
+```{r}
+dane3<-dane2
+```
+
+**BeerID - zmienna nie podlega analizie wartości skrajnych, ponieważ jest to tylko identyfikator przepisu na piwo i nie może on być wartością skrajną lub nieskrajnych**
+
+**StyleID - zmienna nie podlega analizie wartości skrajnych, ponieważ jest to tylko identyfikator stylu piwa i nie może on być wartością skrajną lub nieskrajnych**
+
+**Size.L.**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane2$Size.L., main = "Histogram")
+boxplot(dane2$Size.L., main = "Boxplot")
+qqnorm(dane2$Size.L., main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane2$Size.L., 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+mean = mean(dane3$Size.L.)
+std = sd(dane3$Size.L.)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane3$Size.L.[which(dane3$Size.L. < Tmin | dane3$Size.L. > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane3$id <- seq(1, length(dane3$StyleID))
+ids <- dane3$id[which(dane3$Size.L. > Tmin & dane3$Size.L. < Tmax)]
+dane4 <- subset(dane3[ids, ])
+head(dane4,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane4$Size.L., main = "Histogram")
+boxplot(dane4$Size.L., main = "Boxplot")
+qqnorm(dane4$Size.L., main = "Normal Q-Q plot")
+```
+
+**OG**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane4$OG, main = "Histogram")
+boxplot(dane4$OG, main = "Boxplot")
+qqnorm(dane4$OG, main = "Normal Q-Q plot") 
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane4$OG, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane4$BeerID)
+mean = mean(dane4$OG)
+std = sd(dane4$OG)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane4$OG[which(dane4$OG < Tmin | dane4$OG > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane4$id <- seq(1, length(dane4$StyleID))
+ids <- dane4$id[which(dane4$OG > Tmin & dane4$OG < Tmax)]
+dane5 <- subset(dane4[ids, ])
+head(dane5,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane5$OG, main = "Histogram")
+boxplot(dane5$OG, main = "Boxplot")
+qqnorm(dane5$OG, main = "Normal Q-Q plot") 
+```
+
+**FG**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane5$FG, main = "Histogram")
+boxplot(dane5$FG, main = "Boxplot")
+qqnorm(dane5$FG, main = "Normal Q-Q plot") 
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane5$FG, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane5$BeerID)
+mean = mean(dane5$FG)
+std = sd(dane5$FG)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane5$FG[which(dane5$FG < Tmin | dane5$FG > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane5$id <- seq(1, length(dane5$StyleID))
+ids <- dane5$id[which(dane5$FG > Tmin & dane5$FG < Tmax)]
+dane6 <- dane5
+head(dane6,5)
+```
+**Ze zmiennej `FG` wartości skrajne nie będą usuwane.**
+
+**ABV**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane6$ABV, main = "Histogram")
+boxplot(dane6$ABV, main = "Boxplot")
+qqnorm(dane6$ABV, main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane6$ABV, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane6$BeerID)
+mean = mean(dane6$ABV)
+std = sd(dane6$ABV)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane6$ABV[which(dane6$ABV < Tmin | dane6$ABV > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane6$id <- seq(1, length(dane6$StyleID))
+ids <- dane6$id[which(dane6$ABV > Tmin & dane6$ABV < Tmax)]
+dane7 <- subset(dane6[ids, ])
+head(dane7,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane7$ABV, main = "Histogram")
+boxplot(dane7$ABV, main = "Boxplot")
+qqnorm(dane7$ABV, main = "Normal Q-Q plot")
+```
+
+**IBU - zmienna będzie podlegać analizie wartości skrajnych, ponieważ są to jednostki gorzkości wyrażone w liczbach**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+dane7$IBU<-as.numeric(dane7$IBU)
+par(mfrow = c(1, 3))
+hist(dane7$IBU, main = "Histogram")
+boxplot(dane7$IBU, main = "Boxplot")
+qqnorm(dane7$IBU, main = "Normal Q-Q plot") 
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane7$IBU, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane7$BeerID)
+mean = mean(dane7$IBU)
+std = sd(dane7$IBU)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane7$IBU[which(dane7$IBU < Tmin | dane7$IBU > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane7$id <- seq(1, length(dane7$StyleID))
+ids <- dane7$id[which(dane7$IBU > Tmin & dane7$IBU < Tmax)]
+dane8 <- subset(dane7[ids, ])
+head(dane8,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane8$ABV, main = "Histogram")
+boxplot(dane8$ABV, main = "Boxplot")
+qqnorm(dane8$ABV, main = "Normal Q-Q plot")
+```
+
+**Color - zmienna będzie podlegać analizie wartości skrajnych, ponieważ są kolory są przedstawione w postaci etykiet liczbowych**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+dane8$Color<-as.numeric(dane8$Color)
+par(mfrow = c(1, 3))
+hist(dane8$Color, main = "Histogram")
+boxplot(dane8$Color, main = "Boxplot")
+qqnorm(dane8$Color, main = "Normal Q-Q plot") 
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane8$Color, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane8$BeerID)
+mean = mean(dane8$Color)
+std = sd(dane8$Color)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane8$Color[which(dane8$Color < Tmin | dane8$Color > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane8$id <- seq(1, length(dane8$StyleID))
+ids <- dane8$id[which(dane8$Color > Tmin & dane8$Color < Tmax)]
+dane9 <- subset(dane8[ids, ])
+head(dane9,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane9$Color, main = "Histogram")
+boxplot(dane9$Color, main = "Boxplot")
+qqnorm(dane9$Color, main = "Normal Q-Q plot") 
+```
+
+**BoilSize**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane9$BoilSize, main = "Histogram")
+boxplot(dane9$BoilSize, main = "Boxplot")
+qqnorm(dane9$BoilSize, main = "Normal Q-Q plot") 
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane9$BoilSize, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane9$BeerID)
+mean = mean(dane9$BoilSize)
+std = sd(dane9$BoilSize)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane9$BoilSize[which(dane9$BoilSize < Tmin | dane9$BoilSize > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane9$id <- seq(1, length(dane9$StyleID))
+ids <- dane9$id[which(dane9$BoilSize > Tmin & dane9$BoilSize < Tmax)]
+dane10 <- subset(dane9[ids, ])
+head(dane10,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane10$BoilSize, main = "Histogram")
+boxplot(dane10$BoilSize, main = "Boxplot")
+qqnorm(dane10$BoilSize, main = "Normal Q-Q plot") 
+```
+
+**BoilTime**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane10$BoilTime, main = "Histogram")
+boxplot(dane10$BoilTime, main = "Boxplot")
+qqnorm(dane10$BoilTime, main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane10$BoilTime, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane10$BeerID)
+mean = mean(dane10$BoilTime)
+std = sd(dane10$BoilTime)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane10$BoilTime[which(dane10$BoilTime < Tmin | dane10$BoilTime > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane10$id <- seq(1, length(dane10$StyleID))
+ids <- dane10$id[which(dane10$BoilTime > Tmin & dane10$BoilTime < Tmax)]
+dane11 <- subset(dane10[ids, ])
+head(dane11,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane11$BoilTime, main = "Histogram")
+boxplot(dane11$BoilTime, main = "Boxplot")
+qqnorm(dane11$BoilTime, main = "Normal Q-Q plot") 
+```
+
+**BoilGravity**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane11$BoilGravity, main = "Histogram")
+boxplot(dane11$BoilGravity, main = "Boxplot")
+qqnorm(dane11$BoilGravity, main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane11$BoilGravity, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane11$BeerID)
+mean = mean(dane11$BoilGravity)
+std = sd(dane11$BoilGravity)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane11$BoilGravity[which(dane11$BoilGravity < Tmin | dane11$BoilGravity > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane11$id <- seq(1, length(dane11$StyleID))
+ids <- dane11$id[which(dane11$BoilGravity > Tmin & dane11$BoilGravity < Tmax)]
+dane12 <- dane11
+head(dane12,5)
+```
+**Ze zmiennej `BoilGravity` wartości skrajne nie będą usuwane.**
+
+**Efficiency - zmienna będzie podlegać analizie wartości skrajnych, ponieważ efektywność wyrażana jest w postaci liczbowej**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+dane12$Efficiency<-as.numeric(dane12$Efficiency)
+par(mfrow = c(1, 3))
+hist(dane12$Efficiency, main = "Histogram")
+boxplot(dane12$Efficiency, main = "Boxplot")
+qqnorm(dane12$Efficiency, main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane12$Efficiency, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane12$BeerID)
+mean = mean(dane12$Efficiency)
+std = sd(dane12$Efficiency)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane12$Efficiency[which(dane12$Efficiency < Tmin | dane12$Efficiency > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane12$id <- seq(1, length(dane12$StyleID))
+ids <- dane12$id[which(dane12$Efficiency > Tmin & dane12$Efficiency < Tmax)]
+dane13 <- subset(dane12[ids, ])
+head(dane13,5)
+```
+**Zmienna `Efficiency` nie posiada wartości skrajnych.**
+
+**MashThickness**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane13$MashThickness, main = "Histogram")
+boxplot(dane13$MashThickness, main = "Boxplot")
+qqnorm(dane13$MashThickness, main = "Normal Q-Q plot") 
+```
+
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane13$MashThickness, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane13$BeerID)
+mean = mean(dane13$MashThickness)
+std = sd(dane13$MashThickness)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane13$MashThickness[which(dane13$MashThickness < Tmin | dane13$MashThickness > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane13$id <- seq(1, length(dane13$StyleID))
+ids <- dane13$id[which(dane13$MashThickness > Tmin & dane13$MashThickness < Tmax)]
+dane14 <- subset(dane13[ids, ])
+head(dane14,5)
+```
+
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane14$MashThickness, main = "Histogram")
+boxplot(dane14$MashThickness, main = "Boxplot")
+qqnorm(dane14$MashThickness, main = "Normal Q-Q plot") 
+```
+
+**BrewMethod - zmienna nie będzie podlegać analizie wartości skrajnych, ponieważ są to tylko 4 rodzaje metod i nie ma tu jednostek skrajnych lub nieskrajnych**
+
+**PrimaryTemp**
+*Wykresy przed analizą wartości skrajnych*
+```{r}
+dane14$PrimaryTemp<-as.numeric(dane14$PrimaryTemp)
+par(mfrow = c(1, 3))
+hist(dane14$PrimaryTemp, main = "Histogram")
+boxplot(dane14$PrimaryTemp, main = "Boxplot")
+qqnorm(dane14$PrimaryTemp, main = "Normal Q-Q plot")
+```
+*Sprawdzenie czy zmienna ma rozkład normalny*
+```{r}
+ks.test(dane14$PrimaryTemp, 'pnorm')
+```
+**Wniosek: Zmienna nie ma rozkładu normalnego**
+
+*Identyfikacja wartości skrajnych*
+```{r}
+#średnia i odchylenie standardowe
+length(dane14$BeerID)
+mean = mean(dane14$PrimaryTemp)
+std = sd(dane14$PrimaryTemp)
+
+#wykorzystanie reguły 3 odchyleń
+Tmin = mean-(3*std)
+Tmax = mean+(3*std)
+
+#znalezienie wartości skrajnych
+head(dane14$PrimaryTemp[which(dane14$PrimaryTemp < Tmin | dane14$PrimaryTemp > Tmax)],10)
+
+#usunięcie wartości skrajnych
+dane14$id <- seq(1, length(dane14$StyleID))
+ids <- dane14$id[which(dane14$PrimaryTemp > Tmin & dane14$PrimaryTemp < Tmax)]
+dane15 <- subset(dane14[ids, ])
+head(dane15,5)
+```
+*Wykresy po analizie wartości skrajnych*
+```{r}
+par(mfrow = c(1, 3))
+hist(dane15$PrimaryTemp, main = "Histogram")
+boxplot(dane15$PrimaryTemp, main = "Boxplot")
+qqnorm(dane15$PrimaryTemp, main = "Normal Q-Q plot")
+```
+
+**b. Podjęcie decyzji: usunięcie czy pozostawienie wartości skrajnych w zbiorze**
+Wszystkie wartości skrajne w zbiorze stanowią 17% wszystkich rekordów. Wartości skrajne dla zmiennych FG oraz BoilGravity nie zostały usunięte, ponieważ spowodowałoby to, że obie zmienne przyjęłyby niemalże jedną watrość dla wszystkich rekordów, zatem stałyby się bezużyteczne. Dla zmiennej Efficiency nie odnotowano jednostek skrajnych. Pozostałe rekordy będące wartościami skrajnymi stanowią 13,35% zbioru wszystkich jednostek. Pomimo, że jest to duża wartość, w celu osiągnięcia lepszych wyników w analizie do, której dane są przygotowywane, postanowiono usunąć wspomniane 13,35% jednostek ze zbioru.
+
+**Nadpisanie zmiennych do dalszej części bez identyfikatora grupy i zmiennej BeerID**
+```{r}
+dane16<-dane15[,-c(1,16)]
+head(dane16,10)
+```
+
+***5. Wybór zmiennych do badania***
+
+**a. Wybranie metody doboru zmiennych z uzasadnieniem wyboru.**
+
+*Aby sprawdzić, które zmienne należy wybrać do estymacji modelu liniowego zastosowano analizę korelacji zmiennych. Pozwala ona na sprawdzenie siły związku liniowego pomiędzy dwoma zmiennymi.*
+```{r}
+dane16$StyleID<-as.numeric(dane16$StyleID)
+dane16$BrewMethod<-as.numeric(dane16$BrewMethod)
+k=cor(dane16)
+corPlot(k, cex = 0.6, cex.axis=0.4,cex.lab=2)
+```
+**Wniosek:**
+Najwyższą wartość korelacji można odnotować pomiędzy zmiennymi OG i FG, która wynosi 0,94. Ponieważ obie zmienne tworzą bardzo niskie korelacje z innymi zmiennymi postanowiono wyeliminować obie. Drugą parą zmiennych, które tworzą korelację powyżej 0,9 jest Size.L. oraz BoilSize. Na tym etapie postanowiono sprawdzenić za pomocą analizy wariancji, którą zmienną należy odrzucić - Size.L. czy BoilSize.
+
+*Również w celu sprawdzenia zależności pomiędzy zmiennymi zastosowano analizę wariancji. ANOVA jest testem statystycznym służącym do szacowania zmian ilościowej zmiennej zależnej w zależności od poziomu jednej lub większej liczby niezależnych zmiennych jakościowych. ANOVA sprawdza, czy istnieje różnica w średnich grup na każdym poziomie zmiennej niezależnej.*
+```{r}
+aov1 <- aov(ABV ~ StyleID+Size.L.+IBU+Color+BoilSize+BoilTime+BoilGravity+Efficiency+MashThickness++BrewMethod+PrimaryTemp,data = dane16)
+summary(aov1)
+cat("\n")
+aov2 <- aov(ABV ~ StyleID+IBU+Color+BoilSize+BoilTime+BoilGravity+Efficiency+MashThickness+BrewMethod+PrimaryTemp,data = dane16)
+summary(aov2)
+cat("\n")
+aov3 <- aov(ABV ~ StyleID+Size.L.+IBU+Color+BoilTime+BoilGravity+Efficiency+MashThickness+BrewMethod+PrimaryTemp,data = dane16)
+summary(aov3)
+```
+
+**Wniosek:**
+Ponieważ różnice są bardzo małe zadecydowano o usunięciu zmiennej Size.L., ponieważ zmienna BoilSize tworzy wyższe wartości korelacji z innymi zmiennymi, a w przypadku analizy wariancji obie zmienne są istotne na tym samym poziomie istotności.  
+
+
+***6. Wybór jednostek do badania.***
+
+**Nadpisanie zmiennych w celu wyboru jednostek do badania**
+```{r}
+dane17<-dane16[,-c(2,3,4)]
+head(dane17,10)
+```
+
+**a. Wybranie schematu losowania z uzasadnieniem wyboru.**
+
+*W celu wylosowania jednostek do badania wybrano losowanie wartstwowe ponieważ, aby przeprowadzić estymację modelu liniowego wyjaśniającego zawartość procentową alkoholu w piwie, potrzebne są róże klasy jednostek, również te mniej liczne w odpowiednich proporcjach. Zostanie wówczas zachowana proporcjonalna liczebność jednostek w każdej z klas*
+
+*Jako kategorię, z której zostaną wylosowane jednostki wybrano BrewMethod - technikę ważenia piwa, która zdecydowanie ma duży wpływ na zawartość procentową alkoholu w piwie*
+
+```{r}
+los_jed = strata(dane17, c("BrewMethod"),size = c(3000,3000,3000,3000), method = "srswor")
+head(los_jed,10)
+dane_finalne=dane17[los_jed$ID_unit,]
+head(dane_finalne,10)
+```
+
